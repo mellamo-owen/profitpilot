@@ -59,7 +59,11 @@ app.disable("x-powered-by");
 
 app.use(
   helmet({
-    crossOriginResourcePolicy: false
+    contentSecurityPolicy: {
+      directives: {
+        scriptSrc: ["'self'", "https://cdn.jsdelivr.net"],
+      },
+    },
   })
 );
 
