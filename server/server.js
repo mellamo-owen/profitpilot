@@ -11,6 +11,7 @@ const reportRoutes = require("./routes/reports");
 const profileRoutes = require("./routes/profile");
 const subscriptionRoutes = require("./routes/subscription");
 const adminRoutes = require("./routes/admin");
+
 const { apiLimiter } = require("./middleware/rateLimiter");
 
 dotenv.config({
@@ -23,21 +24,34 @@ const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 
-const isProduction = process.env.NODE_ENV === "production";
+const isProduction =
+  process.env.NODE_ENV === "production";
+
+/*
+|--------------------------------------------------------------------------
+| Required Environment Variables
+|--------------------------------------------------------------------------
+*/
 
 if (!MONGODB_URI) {
-  console.error("MONGODB_URI is missing from server/.env");
+  console.error(
+    "MONGODB_URI is missing from environment variables."
+  );
+
   process.exit(1);
 }
 
 if (!JWT_SECRET) {
-  console.error("JWT_SECRET is missing from server/.env");
+  console.error(
+    "JWT_SECRET is missing from environment variables."
+  );
+
   process.exit(1);
 }
 
 /*
 |--------------------------------------------------------------------------
-| Security
+| Basic Security
 |--------------------------------------------------------------------------
 */
 
@@ -64,17 +78,31 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests without an Origin header.
-      // Useful for server-to-server requests and local tools.
+      /*
+       * Requests without an Origin header are allowed.
+       * This is useful for server-to-server requests and
+       * some development tools.
+       */
       if (!origin) {
         return callback(null, true);
       }
 
+      /*
+       * Allow the configured frontend URL.
+       */
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      /*
+       * Allow localhost development ports.
+       */
       if (
-        allowedOrigins.includes(origin) ||
-        (!isProduction &&
-          (origin.startsWith("http://localhost:") ||
-            origin.startsWith("http://127.0.0.1:")))
+        !isProduction &&
+        (
+          origin.startsWith("http://localhost:") ||
+          origin.startsWith("http://127.0.0.1:")
+        )
       ) {
         return callback(null, true);
       }
@@ -83,15 +111,28 @@ app.use(
         new Error("CORS policy: Origin not allowed")
       );
     },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS"
+    ],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization"
+    ],
+
     credentials: false
   })
 );
 
 /*
 |--------------------------------------------------------------------------
-| Request Parsing
+| JSON Request Parsing
 |--------------------------------------------------------------------------
 */
 
@@ -116,9 +157,16 @@ app.use("/api", apiLimiter);
 */
 
 app.use("/api/auth", authRoutes);
+
 app.use("/api/reports", reportRoutes);
+
 app.use("/api/profile", profileRoutes);
-app.use("/api/subscription", subscriptionRoutes.router);
+
+app.use(
+  "/api/subscription",
+  subscriptionRoutes.router
+);
+
 app.use("/api/admin", adminRoutes);
 
 /*
@@ -131,7 +179,9 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({
     success: true,
     message: "ProfitPilot API is running",
-    environment: isProduction ? "production" : "development"
+    environment: isProduction
+      ? "production"
+      : "development"
   });
 });
 
@@ -139,25 +189,49 @@ app.get("/api/health", (req, res) => {
 |--------------------------------------------------------------------------
 | Production Frontend
 |--------------------------------------------------------------------------
-|
-| When deployed as one application, Express can serve the frontend.
-|
 */
 
 if (isProduction) {
-  const frontendPath = path.join(__dirname, "..");
+  const frontendPath = path.join(
+    __dirname,
+    ".."
+  );
 
-  app.use(express.static(frontendPath));
+  /*
+   * Serve index.html, CSS, JavaScript and images.
+   */
+  app.use(
+    express.static(frontendPath)
+  );
 
-  app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api/")) {
-      return next();
+  /*
+   * Express 5 compatible catch-all route.
+   *
+   * This replaces the old:
+   *
+   * app.get("*", ...)
+   *
+   * which causes a PathError in Express 5.
+   */
+  app.get(
+    "/{*splat}",
+    (req, res, next) => {
+      /*
+       * Do not let frontend routing handle
+       * unknown API endpoints.
+       */
+      if (req.path.startsWith("/api/")) {
+        return next();
+      }
+
+      res.sendFile(
+        path.join(
+          frontendPath,
+          "index.html"
+        )
+      );
     }
-
-    res.sendFile(
-      path.join(frontendPath, "index.html")
-    );
-  });
+  );
 }
 
 /*
@@ -166,12 +240,15 @@ if (isProduction) {
 |--------------------------------------------------------------------------
 */
 
-app.use("/api", (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: "API endpoint not found"
-  });
-});
+app.use(
+  "/api",
+  (req, res) => {
+    res.status(404).json({
+      success: false,
+      message: "API endpoint not found"
+    });
+  }
+);
 
 /*
 |--------------------------------------------------------------------------
@@ -179,55 +256,90 @@ app.use("/api", (req, res) => {
 |--------------------------------------------------------------------------
 */
 
-app.use((error, req, res, next) => {
-  console.error("Server error:", error.message);
+app.use(
+  (error, req, res, next) => {
+    console.error(
+      "Server error:",
+      error.message
+    );
 
-  if (error.message.startsWith("CORS policy")) {
-    return res.status(403).json({
+    /*
+     * CORS error
+     */
+    if (
+      error.message &&
+      error.message.startsWith(
+        "CORS policy"
+      )
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Request origin is not allowed"
+      });
+    }
+
+    /*
+     * Invalid JSON
+     */
+    if (
+      error instanceof SyntaxError &&
+      error.status === 400 &&
+      "body" in error
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid JSON request"
+      });
+    }
+
+    /*
+     * Production hides internal error details.
+     */
+    return res.status(
+      error.status || 500
+    ).json({
       success: false,
-      message: "Request origin is not allowed"
-    });
-  }
-
-  if (error instanceof SyntaxError && error.status === 400) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid JSON request"
-    });
-  }
-
-  res.status(error.status || 500).json({
-    success: false,
-    message:
-      isProduction
+      message: isProduction
         ? "An unexpected server error occurred"
         : error.message
-  });
-});
+    });
+  }
+);
 
 /*
 |--------------------------------------------------------------------------
-| Database Connection
+| Start Server
 |--------------------------------------------------------------------------
 */
 
 async function startServer() {
   try {
-    await mongoose.connect(MONGODB_URI);
+    await mongoose.connect(
+      MONGODB_URI
+    );
 
-    console.log("MongoDB connected successfully");
+    console.log(
+      "MongoDB connected successfully"
+    );
 
-    app.listen(PORT, () => {
-      console.log(
-        `ProfitPilot server running on port ${PORT}`
-      );
+    app.listen(
+      PORT,
+      () => {
+        console.log(
+          `ProfitPilot server running on port ${PORT}`
+        );
 
-      console.log(
-        `Environment: ${
-          isProduction ? "production" : "development"
-        }`
-      );
-    });
+        console.log(
+          `Environment: ${
+            isProduction
+              ? "production"
+              : "development"
+          }`
+        );
+      }
+    );
   } catch (error) {
     console.error(
       "Failed to connect to MongoDB:",
