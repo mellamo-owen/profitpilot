@@ -2564,3 +2564,9 @@ window.activateSubscription =
 
 window.viewAdminUser =
   viewAdminUser;
+
+
+// Initialize ProfitPilot after the page loads
+document.addEventListener('DOMContentLoaded', () => {
+  setupEventListeners();
+});
